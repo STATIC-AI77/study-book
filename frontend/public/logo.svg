@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" width="100%" height="100%">
+  <defs>
+    <!-- Modern architectural gradients matching the design tokens -->
+    <linearGradient id="sbCoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2e6b4f" />
+      <stop offset="100%" stop-color="#0e7268" />
+    </linearGradient>
+    <linearGradient id="sbAccentGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#095a51" />
+      <stop offset="100%" stop-color="#a97b12" />
+    </linearGradient>
+    <linearGradient id="sbPulseGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a97b12" />
+      <stop offset="100%" stop-color="#f3ead3" />
+    </linearGradient>
+    <filter id="sbSubtleShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1" flood-color="#095a51" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- Background Base Aperture / Modern Hex-Prism Knowledge Core -->
+  <!-- Layer 1: Left Wing / Primary Vector Matrix -->
+  <path
+    d="M8 14L24 6L24 28L8 36Z"
+    fill="url(#sbCoreGrad)"
+    filter="url(#sbSubtleShadow)"
+  />
+
+  <!-- Layer 2: Right Wing / Reflective Synthesis Plane -->
+  <path
+    d="M40 14L24 6L24 28L40 36Z"
+    fill="url(#sbAccentGrad)"
+    opacity="0.9"
+  />
+
+  <!-- Layer 3: Intersecting Isometric Monolith (Cognitive Anchor) -->
+  <path
+    d="M24 16L34 21.5L24 42L14 21.5Z"
+    fill="#ffffff"
+    opacity="0.12"
+  />
+
+  <!-- Layer 4: Geometric Neural Diamond / Focal Nexus -->
+  <path
+    d="M24 18L30 25L24 32L18 25Z"
+    fill="url(#sbPulseGrad)"
+    stroke="#ffffff"
+    stroke-width="1.2"
+    stroke-linejoin="round"
+  />
+
+  <!-- Precision Horizon Circuit / Energy Beam Core -->
+  <circle cx="24" cy="25" r="2.2" fill="#245740" />
+  <circle cx="24" cy="25" r="1" fill="#ffffff" />
+
+  <!-- Subtle Precision Laser Axis -->
+  <line x1="24" y1="6" x2="24" y2="14" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" opacity="0.4" />
+  <line x1="24" y1="36" x2="24" y2="42" stroke="#a97b12" stroke-width="1.5" stroke-linecap="round" />
+</svg>
