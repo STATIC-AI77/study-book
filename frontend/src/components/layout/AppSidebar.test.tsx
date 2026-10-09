@@ -18,17 +18,17 @@ describe('AppSidebar', () => {
     vi.mocked(usePathname).mockReturnValue('')
   })
 
-  it('highlights only Models (not Settings) on the Models page', () => {
+  it('highlights Models on the Models page', () => {
     vi.mocked(usePathname).mockReturnValue('/settings/models')
 
     const { container } = render(<AppSidebar />)
 
     const modelsButton = container.querySelector('a[href="/settings/models"] button')
-    const settingsButton = container.querySelector('a[href="/settings"] button')
+    const transformationsButton = container.querySelector('a[href="/transformations"] button')
 
     expect(modelsButton?.className).toContain('font-semibold')
-    expect(settingsButton?.className).toContain('font-medium')
-    expect(settingsButton?.className).not.toContain('font-semibold')
+    expect(transformationsButton?.className).toContain('font-medium')
+    expect(transformationsButton?.className).not.toContain('font-semibold')
   })
 
   it('renders correctly when expanded', () => {

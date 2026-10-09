@@ -31,13 +31,11 @@ import {
   Mic,
   Bot,
   Shuffle,
-  Settings,
   LogOut,
   ChevronLeft,
   Menu,
   FileText,
   Plus,
-  Wrench,
   Command,
   User,
 } from 'lucide-react'
@@ -67,8 +65,6 @@ const getNavigation = (t: TFunction) => [
     items: [
       { name: t('navigation.models'), href: '/settings/models', icon: Bot, iconClass: undefined },
       { name: t('navigation.transformations'), href: '/transformations', icon: Shuffle, iconClass: undefined },
-      { name: t('navigation.settings'), href: '/settings', icon: Settings, iconClass: undefined },
-      { name: t('navigation.advanced'), href: '/advanced', icon: Wrench, iconClass: undefined },
     ],
   },
 ] as const
