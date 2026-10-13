@@ -918,6 +918,43 @@ async def discover_omlx_models() -> List[DiscoveredModel]:
     return models
 
 
+async def discover_kaggle_models() -> List[DiscoveredModel]:
+    """Discover models from Kaggle TPU backend."""
+    base_url = os.environ.get("KAGGLE_BASE_URL", "")
+    api_key = os.environ.get("KAGGLE_API_KEY", "")
+
+    try:
+        credentials = await Credential.get_by_provider("kaggle")
+        if credentials:
+            config = credentials[0].to_esperanto_config()
+            base_url = config.get("base_url") or base_url
+            api_key = config.get("api_key") or api_key
+    except Exception as e:
+        logger.debug(f"Failed to read kaggle config from Credential: {e}")
+
+    if not base_url:
+        logger.info("No base_url configured for kaggle provider")
+        return []
+
+    try:
+        from backend.ai.kaggle import KaggleClient
+        client = KaggleClient(base_url=base_url, api_key=api_key)
+        raw_models = await client.discover_models()
+        return [
+            DiscoveredModel(
+                name=m["name"],
+                provider="kaggle",
+                model_type=m.get("type", "language"),
+                description=m.get("description", "Kaggle TPU Model"),
+            )
+            for m in raw_models
+            if m.get("name")
+        ]
+    except Exception as e:
+        logger.warning(f"Failed to discover Kaggle models: {e}")
+        return []
+
+
 # =============================================================================
 # Main Discovery Functions
 # =============================================================================
@@ -946,6 +983,7 @@ PROVIDER_DISCOVERY_FUNCTIONS = {
     "zai": discover_zai_models,
     "ppq": discover_ppq_models,
     "cohere": discover_cohere_models,
+    "kaggle": discover_kaggle_models,
     "azure": None,  # Azure requires credential-based discovery (different auth)
     "vertex": None,  # Vertex requires credential-based discovery (service account)
 }

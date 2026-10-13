@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Sparkles,
   RotateCcw,
@@ -8,21 +8,22 @@ import {
   ChevronRight,
   Check,
   X,
-  Layers,
   Award,
   Loader2,
-  BookOpen,
   HelpCircle,
   Lightbulb,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { chatApi } from '@/lib/api/chat'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { notebooksApi } from '@/lib/api/notebooks'
 import { SourceListResponse, NoteResponse, FlashcardDeckPayload } from '@/lib/types/api'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { ModelSelector } from '@/components/sources/ModelSelector'
 
 export interface Flashcard {
   id: number
@@ -38,9 +39,8 @@ interface FlashcardsModalProps {
   notebookName: string
   sources?: SourceListResponse[]
   notes?: NoteResponse[]
+  defaultModelOverride?: string
 }
-
-const MIN_CARDS_REQUIRED = 25
 
 export function FlashcardsModal({
   open,
@@ -49,6 +49,7 @@ export function FlashcardsModal({
   notebookName,
   sources = [],
   notes = [],
+  defaultModelOverride,
 }: FlashcardsModalProps) {
   const [cards, setCards] = useState<Flashcard[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -57,10 +58,16 @@ export function FlashcardsModal({
   const [wrongCount, setWrongCount] = useState(0)
   const [isGenerating, setIsGenerating] = useState(false)
   const [isCompleted, setIsCompleted] = useState(false)
+  const [cardCount, setCardCount] = useState<number>(25)
+  const [showConfig, setShowConfig] = useState<boolean>(false)
 
-  const storageKey = `notebook-flashcards-${notebookId}`
+  const [selectedModel, setSelectedModel] = useState<string | undefined>(defaultModelOverride)
 
-  // Persist state to SurrealDB (and localStorage fallback)
+  const handleModelChange = useCallback((model?: string) => {
+    setSelectedModel(model)
+  }, [])
+
+  // Persist state directly to SurrealDB
   const persistDeckState = useCallback(
     async (
       deckCards: Flashcard[],
@@ -68,34 +75,24 @@ export function FlashcardsModal({
       wrong: number,
       lastIndex: number
     ) => {
-      // 1. Cache locally
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(deckCards))
-        localStorage.setItem(
-          `${storageKey}-progress`,
-          JSON.stringify({ correct, wrong, lastIndex })
-        )
-      } catch {
-        // ignore local storage errors
-      }
-
-      // 2. Persist to SurrealDB
       try {
         const payload: FlashcardDeckPayload = {
           cards: deckCards,
           correct_count: correct,
           wrong_count: wrong,
           last_card_index: lastIndex,
+          model_override: selectedModel,
+          target_count: cardCount,
         }
         await notebooksApi.saveFlashcards(notebookId, payload)
       } catch (err) {
         console.error('Failed to save flashcards to SurrealDB:', err)
       }
     },
-    [notebookId, storageKey]
+    [notebookId, selectedModel, cardCount]
   )
 
-  // Load existing cards and scores from SurrealDB (or localStorage fallback) when opened
+  // Load existing cards, model, count, and scores from SurrealDB when opened
   useEffect(() => {
     if (!open) return
 
@@ -103,49 +100,37 @@ export function FlashcardsModal({
 
     const loadDeck = async () => {
       try {
-        // Check SurrealDB first
         const remote = await notebooksApi.getFlashcards(notebookId)
         if (cancelled) return
 
-        if (remote && Array.isArray(remote.cards) && remote.cards.length > 0) {
-          setCards(remote.cards)
-          setCorrectCount(remote.correct_count ?? 0)
-          setWrongCount(remote.wrong_count ?? 0)
-          const idx = Math.min(remote.last_card_index ?? 0, remote.cards.length - 1)
-          setCurrentIndex(Math.max(0, idx))
-          setIsCompleted(
-            remote.cards.length > 0 &&
-              remote.correct_count + remote.wrong_count >= remote.cards.length
-          )
-          return
-        }
-      } catch (e) {
-        console.warn('Could not load flashcards from SurrealDB, checking localStorage', e)
-      }
+        if (remote) {
+          if (remote.model_override) {
+            setSelectedModel(remote.model_override)
+          }
+          if (remote.target_count) {
+            setCardCount(remote.target_count)
+          }
 
-      // Fallback: check localStorage
-      try {
-        const cached = localStorage.getItem(storageKey)
-        if (cached) {
-          const parsed = JSON.parse(cached)
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setCards(parsed)
-            const progress = localStorage.getItem(`${storageKey}-progress`)
-            if (progress) {
-              const { correct, wrong, lastIndex } = JSON.parse(progress)
-              setCorrectCount(correct ?? 0)
-              setWrongCount(wrong ?? 0)
-              setCurrentIndex(lastIndex ?? 0)
-            }
+          if (Array.isArray(remote.cards) && remote.cards.length > 0) {
+            setCards(remote.cards)
+            setCorrectCount(remote.correct_count ?? 0)
+            setWrongCount(remote.wrong_count ?? 0)
+            const idx = Math.min(remote.last_card_index ?? 0, remote.cards.length - 1)
+            setCurrentIndex(Math.max(0, idx))
+            setIsCompleted(
+              remote.cards.length > 0 &&
+                remote.correct_count + remote.wrong_count >= remote.cards.length
+            )
+            setShowConfig(false)
             return
           }
         }
-      } catch {
-        // ignore
+      } catch (e) {
+        console.error('Could not load flashcards from SurrealDB:', e)
       }
 
-      // If no cards exist anywhere, trigger generation
-      generateFlashcards()
+      // If no cards exist in SurrealDB, show setup screen
+      setShowConfig(true)
     }
 
     loadDeck()
@@ -153,7 +138,6 @@ export function FlashcardsModal({
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, notebookId])
 
   const generateFlashcards = async () => {
@@ -165,98 +149,29 @@ export function FlashcardsModal({
     setIsCompleted(false)
 
     try {
-      // 1. Build context configuration
-      const sourceConfig: Record<string, 'full' | 'insights'> = {}
-      sources.forEach((s) => {
-        sourceConfig[s.id] = 'full'
+      const targetCount = Math.min(100, Math.max(1, Number(cardCount) || 25))
+
+      // Dedicated flashcard generation endpoint (zero pollution to chat sessions)
+      const result = await notebooksApi.generateFlashcards(notebookId, {
+        count: targetCount,
+        model_override: selectedModel,
       })
 
-      const noteConfig: Record<string, 'full'> = {}
-      notes.forEach((n) => {
-        noteConfig[n.id] = 'full'
-      })
-
-      const contextData = await chatApi.buildContext({
-        notebook_id: notebookId,
-        context_config: {
-          sources: sourceConfig,
-          notes: noteConfig,
-        },
-      })
-
-      // 2. Create a generation session
-      const session = await chatApi.createSession({
-        notebook_id: notebookId,
-        title: `Flashcards: ${notebookName}`,
-      })
-
-      // 3. Prompt for at least 25 flashcards like NotebookLM
-      const flashcardPrompt = `You are an expert tutor creating study flashcards like NotebookLM.
-Analyze all provided sources and notes thoroughly.
-Generate a comprehensive, rigorous study deck of at least 25 high-quality flashcards covering core concepts, key mechanisms, definitions, critical facts, and application scenarios.
-
-STRICT INSTRUCTIONS:
-1. Generate AT LEAST 25 flashcards (minimum 25 cards, numbered 1 to 25+).
-2. Questions must be crisp, insightful, and test genuine understanding.
-3. Answers must be direct, clear, and comprehensive.
-4. Output ONLY valid JSON in this exact structure without conversational markdown:
-[
-  {
-    "id": 1,
-    "question": "Question text here?",
-    "answer": "Answer explanation here.",
-    "category": "Topic Name"
-  }
-]
-`
-
-      const result = await chatApi.sendMessage({
-        session_id: session.id,
-        message: flashcardPrompt,
-        context: contextData.context,
-      })
-
-      const aiMessage = result.messages.find((m) => m.type === 'ai')?.content || ''
-
-      // 4. Parse JSON from output
-      let parsedCards: Flashcard[] = []
-      const jsonMatch = aiMessage.match(/\[[\s\S]*\]/)
-      if (jsonMatch) {
-        try {
-          parsedCards = JSON.parse(jsonMatch[0])
-        } catch {
-          // Fallback parsing cleanup
-          const cleaned = jsonMatch[0]
-            .replace(/,\s*([}\]])/g, '$1')
-            .replace(/[\u0000-\u001F]+/g, ' ')
-          parsedCards = JSON.parse(cleaned)
-        }
+      if (!result || !Array.isArray(result.cards) || result.cards.length === 0) {
+        throw new Error('No flashcards were generated by the model.')
       }
 
-      if (!Array.isArray(parsedCards) || parsedCards.length === 0) {
-        throw new Error('Could not parse flashcards from model response.')
-      }
-
-      // Ensure valid structure
-      const validCards = parsedCards
-        .filter((c) => c && typeof c.question === 'string' && typeof c.answer === 'string')
-        .map((c, idx) => ({
-          id: c.id || idx + 1,
-          question: c.question.trim(),
-          answer: c.answer.trim(),
-          category: c.category || 'General',
-        }))
-
-      if (validCards.length === 0) {
-        throw new Error('No valid flashcards found.')
-      }
-
-      setCards(validCards)
-      persistDeckState(validCards, 0, 0, 0)
-      toast.success(`Generated ${validCards.length} flashcards!`)
-    } catch (err) {
+      setCards(result.cards)
+      setShowConfig(false)
+      persistDeckState(result.cards, 0, 0, 0)
+      toast.success(`Generated ${result.cards.length} flashcards!`)
+    } catch (err: any) {
       console.error('Failed to generate flashcards:', err)
-      toast.error('Failed to generate flashcards. Please try again.')
+      const detailMessage =
+        err?.response?.data?.detail ||
+        err?.message ||
+        'Failed to generate flashcards. Please try again.'
+      toast.error(detailMessage)
     } finally {
       setIsGenerating(false)
     }
@@ -316,7 +231,7 @@ STRICT INSTRUCTIONS:
 
   // Keyboard navigation
   useEffect(() => {
-    if (!open || isGenerating) return
+    if (!open || isGenerating || showConfig) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -335,7 +250,7 @@ STRICT INSTRUCTIONS:
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [open, isGenerating, handleCorrect, handleWrong, handleFlip, onOpenChange])
+  }, [open, isGenerating, showConfig, handleCorrect, handleWrong, handleFlip, onOpenChange])
 
   const currentCard = cards[currentIndex]
   const nextCard1 = cards[currentIndex + 1]
@@ -361,7 +276,7 @@ STRICT INSTRUCTIONS:
                 Flashcards
               </h2>
               <Badge variant="outline" className="text-[10px] font-mono py-0 h-4 px-1.5">
-                {cards.length > 0 ? `${currentIndex + 1} / ${cards.length}` : '0 / 0'}
+                {cards.length > 0 && !showConfig ? `${currentIndex + 1} / ${cards.length}` : `${cards.length} cards`}
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground truncate max-w-xs sm:max-w-md">
@@ -370,29 +285,52 @@ STRICT INSTRUCTIONS:
           </div>
         </div>
 
-        {/* Real-time score badges */}
+        {/* Real-time score badges and controls */}
         <div className="flex items-center gap-2">
-          <Badge
-            variant="outline"
-            className="gap-1 border-destructive/40 text-destructive bg-destructive-tint/20 text-xs px-2 py-0.5"
-          >
-            <X className="size-3" />
-            <span>{wrongCount} Wrong</span>
-          </Badge>
+          {cards.length > 0 && !showConfig && !isGenerating && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowConfig(true)}
+              className="gap-1.5 text-xs h-8 px-2.5"
+              title="Configure new deck settings"
+            >
+              <SlidersHorizontal className="size-3.5" />
+              <span className="hidden sm:inline">New Deck</span>
+            </Button>
+          )}
 
-          <Badge
-            variant="outline"
-            className="gap-1 border-fern/40 text-fern bg-fern-tint/20 text-xs px-2 py-0.5"
-          >
-            <Check className="size-3" />
-            <span>{correctCount} Correct</span>
-          </Badge>
+          <ModelSelector
+            currentModel={selectedModel}
+            onModelChange={handleModelChange}
+            disabled={isGenerating}
+          />
+
+          {cards.length > 0 && !showConfig && (
+            <>
+              <Badge
+                variant="outline"
+                className="gap-1 border-destructive/40 text-destructive bg-destructive-tint/20 text-xs px-2 py-0.5"
+              >
+                <X className="size-3" />
+                <span>{wrongCount} Wrong</span>
+              </Badge>
+
+              <Badge
+                variant="outline"
+                className="gap-1 border-fern/40 text-fern bg-fern-tint/20 text-xs px-2 py-0.5"
+              >
+                <Check className="size-3" />
+                <span>{correctCount} Correct</span>
+              </Badge>
+            </>
+          )}
 
           <Button
             variant="ghost"
             size="icon"
             onClick={() => onOpenChange(false)}
-            className="size-8 text-muted-foreground hover:text-foreground ml-2"
+            className="size-8 text-muted-foreground hover:text-foreground ml-1"
             aria-label="Close"
           >
             <X className="size-4" />
@@ -407,11 +345,113 @@ STRICT INSTRUCTIONS:
             <Loader2 className="size-10 text-fern animate-spin" />
             <div className="space-y-1">
               <h3 className="font-display font-semibold text-base text-foreground">
-                Synthesizing Flashcards
+                Synthesizing {cardCount} Flashcards
               </h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Analyzing all sources and notes in <span className="font-medium text-foreground">{notebookName}</span> to generate at least {MIN_CARDS_REQUIRED} intelligent study cards...
+                Analyzing sources and notes in <span className="font-medium text-foreground">{notebookName}</span> with your selected model...
               </p>
+            </div>
+          </div>
+        ) : showConfig || cards.length === 0 ? (
+          /* Separate Setup & Configuration View */
+          <div className="w-full max-w-md p-6 sm:p-8 rounded-2xl border border-border/80 bg-card shadow-xl space-y-6 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-fern-tint/40 text-fern">
+                <Sparkles className="size-6" />
+              </div>
+              <div>
+                <h3 className="font-display font-semibold text-lg text-foreground">
+                  {cards.length > 0 ? 'Create New Deck' : 'Generate Study Flashcards'}
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Configure your flashcard settings before generating.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-1">
+              {/* Model Selection Menu */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-foreground">AI Model</Label>
+                <div className="flex items-center justify-between p-2.5 rounded-lg border border-border/70 bg-muted/30">
+                  <span className="text-xs text-muted-foreground">Language Model</span>
+                  <ModelSelector
+                    currentModel={selectedModel}
+                    onModelChange={handleModelChange}
+                    disabled={isGenerating}
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Select any configured model (e.g. OpenRouter DeepSeek, Gemini, etc.).
+                </p>
+              </div>
+
+              {/* Number of Cards (Default 25, Max 100) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="flashcard-count" className="text-xs font-medium text-foreground">
+                    Number of Flashcards
+                  </Label>
+                  <span className="text-xs font-mono text-muted-foreground">
+                    Max: 100
+                  </span>
+                </div>
+                <Input
+                  id="flashcard-count"
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={cardCount}
+                  onChange={(e) => {
+                    const raw = e.target.value
+                    if (raw === '') {
+                      setCardCount(25)
+                      return
+                    }
+                    const val = parseInt(raw, 10)
+                    if (!isNaN(val)) {
+                      setCardCount(Math.min(100, Math.max(1, val)))
+                    }
+                  }}
+                  className="font-mono text-sm"
+                  placeholder="25"
+                />
+                <div className="flex gap-1.5 pt-0.5">
+                  {[10, 20, 25, 50, 75, 100].map((preset) => (
+                    <Button
+                      key={preset}
+                      type="button"
+                      variant={cardCount === preset ? 'secondary' : 'outline'}
+                      size="sm"
+                      className="h-7 text-xs px-2 font-mono flex-1"
+                      onClick={() => setCardCount(preset)}
+                    >
+                      {preset}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2.5 pt-2">
+              {cards.length > 0 && (
+                <Button
+                  variant="outline"
+                  onClick={() => setShowConfig(false)}
+                  className="flex-1"
+                  disabled={isGenerating}
+                >
+                  Cancel
+                </Button>
+              )}
+              <Button
+                onClick={generateFlashcards}
+                disabled={isGenerating}
+                className="flex-1 gap-2 bg-fern text-on-primary hover:bg-fern-deep font-semibold"
+              >
+                <Sparkles className="size-4" />
+                <span>Generate {cardCount} Cards</span>
+              </Button>
             </div>
           </div>
         ) : isCompleted ? (
@@ -450,25 +490,11 @@ STRICT INSTRUCTIONS:
                 <RotateCcw className="size-4" />
                 <span>Review Deck Again</span>
               </Button>
-              <Button variant="outline" onClick={generateFlashcards} className="w-full gap-2">
-                <Sparkles className="size-4" />
-                <span>Regenerate Fresh Cards</span>
+              <Button variant="outline" onClick={() => setShowConfig(true)} className="w-full gap-2">
+                <SlidersHorizontal className="size-4" />
+                <span>Configure New Deck</span>
               </Button>
             </div>
-          </div>
-        ) : cards.length === 0 ? (
-          <div className="text-center p-8 border border-border/80 rounded-2xl bg-card space-y-4 max-w-md">
-            <HelpCircle className="size-10 text-muted-foreground mx-auto" />
-            <div>
-              <h3 className="font-semibold text-foreground">No Flashcards Available</h3>
-              <p className="text-xs text-muted-foreground mt-1">
-                Add sources or notes to this notebook and click below to generate a study deck.
-              </p>
-            </div>
-            <Button onClick={generateFlashcards} className="gap-2 bg-fern text-on-primary hover:bg-fern-deep">
-              <Sparkles className="size-4" />
-              <span>Generate 25+ Flashcards</span>
-            </Button>
           </div>
         ) : (
           /* 3D Stacked Flashcards Deck */
@@ -546,7 +572,7 @@ STRICT INSTRUCTIONS:
       </div>
 
       {/* Bottom Action Controls Dock */}
-      {cards.length > 0 && !isCompleted && !isGenerating && (
+      {cards.length > 0 && !isCompleted && !isGenerating && !showConfig && (
         <div className="w-full max-w-xl mx-auto flex flex-col items-center gap-3 pt-2">
           {/* Progress bar */}
           <div className="w-full space-y-1">
@@ -605,11 +631,11 @@ STRICT INSTRUCTIONS:
             </button>
             <span>•</span>
             <button
-              onClick={generateFlashcards}
+              onClick={() => setShowConfig(true)}
               className="hover:text-foreground transition-colors flex items-center gap-1 cursor-pointer"
             >
-              <Sparkles className="size-3" />
-              <span>Regenerate cards</span>
+              <SlidersHorizontal className="size-3" />
+              <span>Customize / New deck</span>
             </button>
           </div>
         </div>

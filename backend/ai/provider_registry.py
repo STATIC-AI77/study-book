@@ -112,6 +112,14 @@ _PROVIDER_SPECS: Tuple[ProviderSpec, ...] = (
         required_env=("OLLAMA_API_BASE",),
         test_model=None,  # Dynamic - uses first available model
     ),
+    ProviderSpec(
+        name="kaggle",
+        display_name="Kaggle TPU",
+        modalities=_ALL_MODALITIES,
+        optional_env=("KAGGLE_BASE_URL", "KAGGLE_API_KEY"),
+        test_model="kaggle-tpu-chat",
+        docs_url="https://kaggle.com",
+    ),
 )
 
 

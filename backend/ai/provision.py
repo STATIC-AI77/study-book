@@ -35,6 +35,23 @@ async def provision_langchain_model(
 
     logger.debug(f"Using model: {model}")
 
+    if model is None and default_type != "chat":
+        logger.debug(f"Falling back to default chat model for {default_type}")
+        model = await model_manager.get_default_model("chat", **kwargs)
+
+    if model is None:
+        from backend.ai.models import Model
+        lang_models = await Model.get_models_by_type("language")
+        for m in lang_models:
+            try:
+                candidate = await model_manager.get_model(str(m.id), **kwargs)
+                if candidate and isinstance(candidate, LanguageModel):
+                    model = candidate
+                    logger.info(f"Fell back to language model: {m.name} ({m.provider})")
+                    break
+            except Exception:
+                continue
+
     if model is None:
         logger.error(
             f"Model provisioning failed: No model found. "
@@ -47,9 +64,15 @@ async def provision_langchain_model(
             f"Please go to Manage → Models and configure a default model for '{default_type}'."
         )
 
+    if isinstance(model, BaseChatModel):
+        return model
+
+    if hasattr(model, "to_langchain"):
+        return model.to_langchain()
+
     if not isinstance(model, LanguageModel):
         logger.error(
-            f"Model type mismatch: Expected LanguageModel but got {type(model).__name__}. "
+            f"Model type mismatch: Expected LanguageModel or BaseChatModel but got {type(model).__name__}. "
             f"Selection reason: {selection_reason}. "
             f"model_id={model_id}, default_type={default_type}."
         )

@@ -146,6 +146,7 @@ export interface BaseChatSession {
   updated: string
   message_count?: number
   model_override?: string | null
+  web_search?: boolean
 }
 
 export interface SourceChatSession extends BaseChatSession {
@@ -215,11 +216,13 @@ export interface CreateNotebookChatSessionRequest {
   notebook_id: string
   title?: string
   model_override?: string
+  web_search?: boolean
 }
 
 export interface UpdateNotebookChatSessionRequest {
   title?: string
   model_override?: string | null
+  web_search?: boolean
 }
 
 export interface SendNotebookChatMessageRequest {
@@ -230,6 +233,7 @@ export interface SendNotebookChatMessageRequest {
     notes: Array<Record<string, unknown>>
   }
   model_override?: string
+  web_search?: boolean
 }
 
 export interface BuildContextRequest {
@@ -268,6 +272,8 @@ export interface FlashcardDeckPayload {
   correct_count: number
   wrong_count: number
   last_card_index: number
+  model_override?: string | null
+  target_count?: number
 }
 
 export interface FlashcardDeckResponse {
@@ -276,6 +282,8 @@ export interface FlashcardDeckResponse {
   correct_count: number
   wrong_count: number
   last_card_index: number
+  model_override?: string | null
+  target_count?: number
   updated?: string
 }
 

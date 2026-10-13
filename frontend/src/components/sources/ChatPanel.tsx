@@ -8,7 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, Clock, Maximize2, Minimize2 } from 'lucide-react'
+import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, Clock, Maximize2, Minimize2, Globe } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { MarkdownRenderer } from '@/components/ui/markdown-renderer'
 import {
@@ -37,7 +37,7 @@ interface ChatPanelProps {
   messages: SourceChatMessage[]
   isStreaming: boolean
   contextIndicators: SourceChatContextIndicator | null
-  onSendMessage: (message: string, modelOverride?: string) => void
+  onSendMessage: (message: string, modelOverride?: string, webSearch?: boolean) => void
   modelOverride?: string
   onModelChange?: (model?: string) => void
   // Session management props
@@ -58,6 +58,9 @@ interface ChatPanelProps {
   // Maximize / focus mode props
   isMaximized?: boolean
   onToggleMaximize?: () => void
+  // Web search toggle props
+  webSearchEnabled?: boolean
+  onToggleWebSearch?: () => void
 }
 
 export function ChatPanel({
@@ -79,7 +82,9 @@ export function ChatPanel({
   notebookContextStats,
   notebookId,
   isMaximized: propIsMaximized,
-  onToggleMaximize
+  onToggleMaximize,
+  webSearchEnabled,
+  onToggleWebSearch
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const [internalMaximized, setInternalMaximized] = useState(false)
@@ -262,6 +267,8 @@ export function ChatPanel({
           modelOverride={modelOverride}
           onModelChange={onModelChange}
           isMaximized={isMaximized}
+          webSearchEnabled={webSearchEnabled}
+          onToggleWebSearch={onToggleWebSearch}
         />
       </CardContent>
     </Card>
@@ -273,11 +280,13 @@ export function ChatPanel({
 // Composer owns the input state so keystrokes (including IME composition) only
 // re-render this small component instead of the whole message history.
 interface ChatComposerProps {
-  onSendMessage: (message: string, modelOverride?: string) => void
+  onSendMessage: (message: string, modelOverride?: string, webSearch?: boolean) => void
   isStreaming: boolean
   modelOverride?: string
   onModelChange?: (model?: string) => void
   isMaximized?: boolean
+  webSearchEnabled?: boolean
+  onToggleWebSearch?: () => void
 }
 
 function ChatComposer({
@@ -285,7 +294,9 @@ function ChatComposer({
   isStreaming,
   modelOverride,
   onModelChange,
-  isMaximized = false
+  isMaximized = false,
+  webSearchEnabled,
+  onToggleWebSearch
 }: ChatComposerProps) {
   const { t } = useTranslation()
   const chatInputId = useId()
@@ -293,7 +304,11 @@ function ChatComposer({
 
   const handleSend = () => {
     if (input.trim() && !isStreaming) {
-      onSendMessage(input.trim(), modelOverride)
+      if (webSearchEnabled !== undefined) {
+        onSendMessage(input.trim(), modelOverride, webSearchEnabled)
+      } else {
+        onSendMessage(input.trim(), modelOverride)
+      }
       setInput('')
     }
   }
@@ -316,17 +331,46 @@ function ChatComposer({
   return (
     <div className="flex-shrink-0 p-4 border-t">
       <div className={cn("space-y-3", isMaximized && "max-w-4xl mx-auto w-full")}>
-        {/* Model selector */}
-        {onModelChange && (
-          <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">{t('chat.model')}</span>
-          <ModelSelector
-            currentModel={modelOverride}
-            onModelChange={onModelChange}
-            disabled={isStreaming}
-          />
-        </div>
-      )}
+        {/* Toolbar: Model selector & Web Search toggle */}
+        {(onModelChange || onToggleWebSearch) && (
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              {onModelChange && (
+                <>
+                  <span className="text-xs text-muted-foreground">{t('chat.model')}</span>
+                  <ModelSelector
+                    currentModel={modelOverride}
+                    onModelChange={onModelChange}
+                    disabled={isStreaming}
+                  />
+                </>
+              )}
+            </div>
+
+            {onToggleWebSearch && (
+              <Button
+                type="button"
+                variant={webSearchEnabled ? "secondary" : "ghost"}
+                size="sm"
+                onClick={onToggleWebSearch}
+                disabled={isStreaming}
+                className={cn(
+                  "h-7 px-2.5 text-xs font-medium gap-1.5 transition-all border",
+                  webSearchEnabled
+                    ? "bg-primary/10 text-primary border-primary/30 hover:bg-primary/20 shadow-sm"
+                    : "text-muted-foreground border-transparent hover:text-foreground hover:bg-muted"
+                )}
+                title={webSearchEnabled ? "Web search active: AI will search the web when needed and cite sources" : "Search web: enable real-time web retrieval"}
+              >
+                <Globe className={cn("h-3.5 w-3.5", webSearchEnabled ? "text-primary" : "text-muted-foreground")} />
+                <span>Web Search</span>
+                {webSearchEnabled && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                )}
+              </Button>
+            )}
+          </div>
+        )}
 
       <div className="flex gap-2 items-end min-w-0">
         <Textarea
@@ -345,6 +389,8 @@ function ChatComposer({
           onClick={handleSend}
           disabled={!input.trim() || isStreaming}
           size="icon"
+          aria-label={t('chat.sendMessage') || 'Send message'}
+          data-testid="chat-send-button"
           className="h-[40px] w-[40px] flex-shrink-0"
         >
           {isStreaming ? (

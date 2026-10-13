@@ -27,6 +27,7 @@ from backend.utils.graph_utils import (
     get_session_message_count,
     invoke_chat_turn,
 )
+from backend.utils.web_search import resolve_search_query, search_web, search_web_deep
 
 router = APIRouter()
 
@@ -38,12 +39,18 @@ class CreateSessionRequest(BaseModel):
     model_override: Optional[str] = Field(
         None, description="Optional model override for this session"
     )
+    web_search: Optional[bool] = Field(
+        False, description="Web search enabled flag"
+    )
 
 
 class UpdateSessionRequest(BaseModel):
     title: Optional[str] = Field(None, description="New session title")
     model_override: Optional[str] = Field(
         None, description="Model override for this session"
+    )
+    web_search: Optional[bool] = Field(
+        None, description="Web search enabled flag"
     )
 
 
@@ -58,6 +65,9 @@ class ChatSessionResponse(BaseModel):
     )
     model_override: Optional[str] = Field(
         None, description="Model override for this session"
+    )
+    web_search: Optional[bool] = Field(
+        False, description="Web search enabled for this session"
     )
 
 
@@ -75,6 +85,9 @@ class ExecuteChatRequest(BaseModel):
     )
     model_override: Optional[str] = Field(
         None, description="Optional model override for this message"
+    )
+    web_search: Optional[bool] = Field(
+        False, description="Whether web search is enabled for this chat turn"
     )
 
 
@@ -122,6 +135,7 @@ async def get_sessions(notebook_id: str = Query(..., description="Notebook ID"))
                     updated=str(session.updated),
                     message_count=msg_count,
                     model_override=getattr(session, "model_override", None),
+                    web_search=bool(getattr(session, "web_search", False)),
                 )
             )
 
@@ -153,6 +167,7 @@ async def create_session(request: CreateSessionRequest):
             title=request.title
             or f"Chat Session {asyncio.get_event_loop().time():.0f}",
             model_override=request.model_override,
+            web_search=bool(request.web_search),
         )
         await session.save()
 
@@ -167,6 +182,7 @@ async def create_session(request: CreateSessionRequest):
             updated=str(session.updated),
             message_count=0,
             model_override=session.model_override,
+            web_search=bool(session.web_search),
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Notebook not found")
@@ -225,6 +241,7 @@ async def get_session(session_id: str):
             message_count=len(messages),
             messages=messages,
             model_override=getattr(session, "model_override", None),
+            web_search=bool(getattr(session, "web_search", False)),
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -252,6 +269,9 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
         if "model_override" in update_data:
             session.model_override = update_data["model_override"]
 
+        if "web_search" in update_data:
+            session.web_search = bool(update_data["web_search"])
+
         await session.save()
 
         # Find notebook_id
@@ -272,6 +292,7 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
             updated=str(session.updated),
             message_count=msg_count,
             model_override=session.model_override,
+            web_search=bool(getattr(session, "web_search", False)),
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -328,6 +349,22 @@ async def execute_chat(request: ExecuteChatRequest):
             else getattr(session, "model_override", None)
         )
 
+        # Determine web search (request parameter or session in SurrealDB)
+        should_web_search = (
+            request.web_search
+            if request.web_search is not None
+            else bool(getattr(session, "web_search", False))
+        )
+        session_dirty = False
+        if request.web_search is not None and getattr(session, "web_search", None) != request.web_search:
+            session.web_search = bool(request.web_search)
+            session_dirty = True
+        if request.model_override is not None and getattr(session, "model_override", None) != request.model_override:
+            session.model_override = request.model_override
+            session_dirty = True
+        if session_dirty:
+            await session.save()
+
         # Get current state
         # Use sync get_state() in a thread since SqliteSaver doesn't support async
         current_state = await asyncio.to_thread(
@@ -337,10 +374,33 @@ async def execute_chat(request: ExecuteChatRequest):
 
         # Prepare state for execution
         state_values = current_state.values if current_state else {}
-        state_values["messages"] = state_values.get("messages", [])
+        existing_messages = state_values.get("messages", [])
+
+        # Handle web search if requested
+        web_context = None
+        if should_web_search:
+            try:
+                web_hits = await search_web_deep(request.message, existing_messages, max_results=5)
+                if web_hits:
+                    web_context_blocks = []
+                    for idx, hit in enumerate(web_hits, start=1):
+                        content_body = hit.get("content") or hit.get("snippet", "")
+                        web_context_blocks.append(
+                            f"[{idx}] Title: {hit.get('title', 'Unknown')}\n"
+                            f"URL: {hit.get('url', '')}\n"
+                            f"Summary / Key Content:\n{content_body}"
+                        )
+                    web_context = "\n\n".join(web_context_blocks)
+                    logger.info(f"Retrieved {len(web_hits)} deep web search results with content for chat")
+            except Exception as e:
+                logger.warning(f"Web search failed during chat execute: {e}")
+
+        state_values["messages"] = list(existing_messages)
         state_values["context"] = request.context
         state_values["notebook"] = notebook
         state_values["model_override"] = model_override
+        state_values["web_search"] = bool(should_web_search)
+        state_values["web_context"] = web_context
 
         # Add user message to state
         from langchain_core.messages import HumanMessage
@@ -379,7 +439,8 @@ async def execute_chat(request: ExecuteChatRequest):
         raise HTTPException(status_code=404, detail="Session not found")
     except HTTPException:
         raise
-    except OpenNotebookError:
+    except OpenNotebookError as e:
+        logger.error(f"OpenNotebookError executing chat: {str(e)}\n{traceback.format_exc()}")
         raise
     except Exception as e:
         # Log detailed error with context for debugging

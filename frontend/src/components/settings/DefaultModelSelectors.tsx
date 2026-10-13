@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ModelCombobox } from '@/components/common/ModelCombobox'
 import { Label } from '@/components/ui/label'
 import { Loader2, X, AlertCircle, Wand2 } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
@@ -70,38 +70,29 @@ function DefaultModelSelect({
         {config.required && <span className="text-destructive ml-0.5">*</span>}
       </Label>
       <div className="flex gap-1">
-        <Select
-          value={currentValue || (config.required ? "" : NONE_VALUE)}
-          onValueChange={(v) => onChange(config.key, v === NONE_VALUE ? "" : v)}
-        >
-          <SelectTrigger
-            id={config.id}
-            className={`h-8 text-xs ${config.required && !isValid && available.length > 0 ? 'border-destructive' : ''}`}
-          >
-            <SelectValue placeholder={
-              config.required && !isValid && available.length > 0
-                ? t('models.requiredModelPlaceholder')
-                : t('models.selectModelPlaceholder')
-            } />
-          </SelectTrigger>
-          <SelectContent>
-            {!config.required && (
-              <SelectItem value={NONE_VALUE}>
-                <span className="text-muted-foreground">
-                  {config.fallsBackToChat ? t('models.noneFallbackToChat') : t('models.noneOption')}
-                </span>
-              </SelectItem>
-            )}
-            {available.sort((a, b) => a.name.localeCompare(b.name)).map(model => (
-              <SelectItem key={model.id} value={model.id}>
-                <div className="flex items-center justify-between w-full">
-                  <span>{model.name}</span>
-                  <span className="text-xs text-muted-foreground ml-2">{model.provider}</span>
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <ModelCombobox
+          id={config.id}
+          models={available}
+          value={currentValue || (config.required ? '' : NONE_VALUE)}
+          onChange={(v) => onChange(config.key, v === NONE_VALUE ? '' : v)}
+          size="sm"
+          triggerClassName={config.required && !isValid && available.length > 0 ? 'border-destructive' : ''}
+          placeholder={
+            config.required && !isValid && available.length > 0
+              ? t('models.requiredModelPlaceholder')
+              : t('models.selectModelPlaceholder')
+          }
+          noneOption={
+            !config.required
+              ? {
+                  value: NONE_VALUE,
+                  label: config.fallsBackToChat
+                    ? t('models.noneFallbackToChat')
+                    : t('models.noneOption'),
+                }
+              : undefined
+          }
+        />
         {!config.required && currentValue && (
           <Button variant="ghost" size="icon" onClick={() => onChange(config.key, "")} className="h-8 w-8 shrink-0">
             <X className="h-3 w-3" />

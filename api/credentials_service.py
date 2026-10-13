@@ -326,6 +326,20 @@ async def test_credential(credential_id: str) -> dict:
             )
             return {"provider": provider, "success": success, "message": message}
 
+        if provider == "kaggle":
+            from backend.ai.kaggle import KaggleClient
+            base_url = config.get("base_url")
+            api_key = config.get("api_key")
+            if not base_url:
+                return {
+                    "provider": provider,
+                    "success": False,
+                    "message": "No base URL configured for Kaggle TPU",
+                }
+            client = KaggleClient(base_url=base_url, api_key=api_key)
+            success, message, _ = await client.health_check()
+            return {"provider": provider, "success": success, "message": message}
+
         # Standard provider: use Esperanto to create and test
         from esperanto.factory import AIFactory
 
@@ -512,6 +526,22 @@ async def discover_with_config(provider: str, config: dict) -> List[dict]:
                 ]
         except Exception as e:
             logger.warning(f"Failed to discover Ollama models: {e}")
+            return []
+
+    if provider == "kaggle":
+        if not base_url:
+            return []
+        try:
+            from backend.ai.kaggle import KaggleClient
+            client = KaggleClient(base_url=base_url, api_key=api_key)
+            models = await client.discover_models()
+            return [
+                {"name": m.get("name", ""), "provider": "kaggle"}
+                for m in models
+                if m.get("name")
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to discover Kaggle models: {e}")
             return []
 
     if provider == "openai_compatible":

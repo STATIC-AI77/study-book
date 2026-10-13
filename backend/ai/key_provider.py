@@ -317,6 +317,15 @@ async def provision_provider_keys(provider: str) -> bool:
         return await _provision_openai_compatible()
     elif provider_lower in ("anthropic-compatible", "anthropic_compatible"):
         return await _provision_anthropic_compatible()
+    elif provider_lower == "kaggle":
+        cred = await _get_default_credential("kaggle")
+        if cred:
+            if cred.base_url:
+                os.environ["KAGGLE_BASE_URL"] = cred.base_url
+            if cred.api_key:
+                os.environ["KAGGLE_API_KEY"] = cred.api_key.get_secret_value()
+            return True
+        return False
 
     # Handle simple providers
     return await _provision_simple_provider(provider_lower)

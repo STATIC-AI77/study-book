@@ -31,8 +31,10 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
   const [isSending, setIsSending] = useState(false)
   const [tokenCount, setTokenCount] = useState<number>(0)
   const [charCount, setCharCount] = useState<number>(0)
-  // Pending model override for when user changes model before a session exists
-  const [pendingModelOverride, setPendingModelOverride] = useState<string | null>(null)
+  // In-memory model override for composer (0ms latency, no DB call on click)
+  const [modelOverride, setModelOverrideState] = useState<string | null>(null)
+  // In-memory web search toggle for composer (0ms latency, no DB call on click)
+  const [webSearchEnabled, setWebSearchEnabledState] = useState<boolean>(false)
 
   // Fetch sessions for this notebook
   const {
@@ -55,10 +57,14 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     enabled: !!notebookId && !!currentSessionId
   })
 
-  // Update messages when current session changes
+  // Update messages and composer preferences when current session changes
   useEffect(() => {
-    if (currentSession?.messages) {
-      setMessages(currentSession.messages)
+    if (currentSession) {
+      if (currentSession.messages) {
+        setMessages(currentSession.messages)
+      }
+      setModelOverrideState(currentSession.model_override ?? null)
+      setWebSearchEnabledState(Boolean(currentSession.web_search))
     }
   }, [currentSession])
 
@@ -173,8 +179,10 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
   }, [notebookId, sources, notes, contextSelections])
 
   // Send message (synchronous, no streaming)
-  const sendMessage = useCallback(async (message: string, modelOverride?: string) => {
+  const sendMessage = useCallback(async (message: string, modelOverrideParam?: string, webSearchParam?: boolean) => {
     let sessionId = currentSessionId
+    const effectiveWebSearch = webSearchParam !== undefined ? webSearchParam : webSearchEnabled
+    const effectiveModelOverride = modelOverrideParam ?? (modelOverride ?? (currentSession?.model_override ?? undefined))
 
     // Auto-create session if none exists
     if (!sessionId) {
@@ -185,13 +193,11 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
         const newSession = await chatApi.createSession({
           notebook_id: notebookId,
           title: defaultTitle,
-          // Include pending model override when creating session
-          model_override: pendingModelOverride ?? undefined
+          model_override: effectiveModelOverride,
+          web_search: effectiveWebSearch
         })
         sessionId = newSession.id
         setCurrentSessionId(sessionId)
-        // Clear pending model override now that it's applied to the session
-        setPendingModelOverride(null)
         queryClient.invalidateQueries({
           queryKey: QUERY_KEYS.notebookChatSessions(notebookId)
         })
@@ -219,7 +225,8 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
         session_id: sessionId,
         message,
         context,
-        model_override: modelOverride ?? (currentSession?.model_override ?? undefined)
+        model_override: effectiveModelOverride,
+        web_search: effectiveWebSearch
       })
 
       // Update messages with API response
@@ -240,7 +247,8 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     notebookId,
     currentSessionId,
     currentSession,
-    pendingModelOverride,
+    modelOverride,
+    webSearchEnabled,
     buildContext,
     refetchCurrentSession,
     queryClient,
@@ -273,19 +281,19 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     return deleteSessionMutation.mutate(sessionId)
   }, [deleteSessionMutation])
 
-  // Set model override - handles both existing sessions and pending state
+  // Set model override - pure in-memory state for composer (instant, zero DB calls on click)
   const setModelOverride = useCallback((model: string | null) => {
-    if (currentSessionId) {
-      // Session exists - update it directly
-      updateSessionMutation.mutate({
-        sessionId: currentSessionId,
-        data: { model_override: model }
-      })
-    } else {
-      // No session yet - store as pending
-      setPendingModelOverride(model)
-    }
-  }, [currentSessionId, updateSessionMutation])
+    setModelOverrideState(model)
+  }, [])
+
+  // Set web search - pure in-memory state for composer (instant, zero DB calls on click)
+  const setWebSearchEnabled = useCallback((enabled: boolean) => {
+    setWebSearchEnabledState(enabled)
+  }, [])
+
+  const toggleWebSearch = useCallback(() => {
+    setWebSearchEnabledState(prev => !prev)
+  }, [])
 
   // Update token/char counts when context selections change
   useEffect(() => {
@@ -309,7 +317,9 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     loadingSessions,
     tokenCount,
     charCount,
-    pendingModelOverride,
+    pendingModelOverride: modelOverride,
+    modelOverride,
+    webSearchEnabled,
 
     // Actions
     createSession,
@@ -318,6 +328,8 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     switchSession,
     sendMessage,
     setModelOverride,
-    refetchSessions
+    refetchSessions,
+    setWebSearchEnabled,
+    toggleWebSearch
   }
 }

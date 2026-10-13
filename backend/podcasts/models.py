@@ -100,22 +100,32 @@ class EpisodeProfile(ObjectModel):
 
     async def resolve_outline_config(self) -> Tuple[str, str, dict]:
         """Resolve outline model -> (provider, model_name, config_dict)"""
-        if not self.outline_llm:
+        model_id = self.outline_llm
+        if not model_id:
+            from backend.ai.models import DefaultModels
+            defaults = await DefaultModels.get_instance()
+            model_id = defaults.default_transformation_model or defaults.default_chat_model
+        if not model_id:
             raise ValueError(
                 f"Episode profile '{self.name}' has no outline model configured. "
                 "Please update the profile to select an outline model."
             )
-        return await _resolve_model_config(self.outline_llm, max_tokens=self.max_tokens)
+        return await _resolve_model_config(model_id, max_tokens=self.max_tokens)
 
     async def resolve_transcript_config(self) -> Tuple[str, str, dict]:
         """Resolve transcript model -> (provider, model_name, config_dict)"""
-        if not self.transcript_llm:
+        model_id = self.transcript_llm
+        if not model_id:
+            from backend.ai.models import DefaultModels
+            defaults = await DefaultModels.get_instance()
+            model_id = defaults.default_transformation_model or defaults.default_chat_model
+        if not model_id:
             raise ValueError(
                 f"Episode profile '{self.name}' has no transcript model configured. "
                 "Please update the profile to select a transcript model."
             )
         return await _resolve_model_config(
-            self.transcript_llm, max_tokens=self.max_tokens
+            model_id, max_tokens=self.max_tokens
         )
 
     @classmethod
@@ -177,12 +187,21 @@ class SpeakerProfile(ObjectModel):
 
     async def resolve_tts_config(self) -> Tuple[str, str, dict]:
         """Resolve TTS model -> (provider, model_name, config_dict)"""
-        if not self.voice_model:
+        model_id = self.voice_model
+        if not model_id:
+            from backend.ai.models import DefaultModels, Model
+            defaults = await DefaultModels.get_instance()
+            model_id = defaults.default_text_to_speech_model
+            if not model_id:
+                tts_models = await Model.get_models_by_type("text_to_speech")
+                if tts_models:
+                    model_id = str(tts_models[0].id)
+        if not model_id:
             raise ValueError(
                 f"Speaker profile '{self.name}' has no voice model configured. "
-                "Please update the profile to select a voice model."
+                "Please configure a text-to-speech model under Models settings."
             )
-        return await _resolve_model_config(self.voice_model)
+        return await _resolve_model_config(model_id)
 
     @classmethod
     async def get_by_name(cls, name: str) -> Optional["SpeakerProfile"]:

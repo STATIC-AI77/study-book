@@ -79,4 +79,16 @@ export const notebooksApi = {
     )
     return response.data
   },
+
+  generateFlashcards: async (
+    notebookId: string,
+    data: { count?: number; model_override?: string }
+  ) => {
+    const cleanId = notebookId.replace(/^notebook:/, '')
+    const response = await apiClient.post<import('@/lib/types/api').FlashcardDeckResponse>(
+      `/notebooks/${cleanId}/flashcards/generate`,
+      data
+    )
+    return response.data
+  },
 }

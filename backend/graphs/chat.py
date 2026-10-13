@@ -17,14 +17,17 @@ from backend.exceptions import IncompleteGenerationError, OpenNotebookError
 from backend.utils import clean_thinking_content
 from backend.utils.error_classifier import classify_error
 from backend.utils.text_utils import extract_text_content
+from loguru import logger
 
 
-class ThreadState(TypedDict):
+class ThreadState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
     notebook: Optional[Notebook]
     context: Optional[str]
     context_config: Optional[dict]
     model_override: Optional[str]
+    web_search: Optional[bool]
+    web_context: Optional[str]
 
 
 def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict:
@@ -88,6 +91,7 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
     except OpenNotebookError:
         raise
     except Exception as e:
+        logger.error(f"Error in call_model_with_messages: {repr(e)}")
         error_class, user_message = classify_error(e)
         raise error_class(user_message) from e
 

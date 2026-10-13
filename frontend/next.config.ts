@@ -27,6 +27,9 @@ const nextConfig: NextConfig = {
     // Increase proxy body size limit for file uploads (default is 10MB)
     // This allows larger files to be uploaded through the /api/* rewrite proxy to FastAPI
     proxyClientMaxBodySize: '100mb',
+    // Increase rewrite proxy timeout to 10 minutes (default is 30s in dev mode)
+    // This prevents socket hang up (ECONNRESET) errors during long LLM generations (#880)
+    proxyTimeout: 600000,
   } as NextConfig['experimental'],
 
   // API Rewrites: Proxy /api/* requests to FastAPI backend

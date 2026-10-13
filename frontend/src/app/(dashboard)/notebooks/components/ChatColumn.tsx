@@ -100,8 +100,8 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
       messages={chat.messages}
       isStreaming={chat.isSending}
       contextIndicators={null}
-      onSendMessage={(message, modelOverride) => chat.sendMessage(message, modelOverride)}
-      modelOverride={chat.currentSession?.model_override ?? chat.pendingModelOverride ?? undefined}
+      onSendMessage={(message, modelOverride, webSearch) => chat.sendMessage(message, modelOverride, webSearch)}
+      modelOverride={chat.modelOverride ?? undefined}
       onModelChange={(model) => chat.setModelOverride(model ?? null)}
       sessions={chat.sessions}
       currentSessionId={chat.currentSessionId}
@@ -114,6 +114,8 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
       notebookId={notebookId}
       isMaximized={chatMaximized}
       onToggleMaximize={toggleChatMaximized}
+      webSearchEnabled={chat.webSearchEnabled}
+      onToggleWebSearch={chat.toggleWebSearch}
     />
   )
 }

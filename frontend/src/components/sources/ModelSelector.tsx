@@ -1,13 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { ModelCombobox } from '@/components/common/ModelCombobox'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
@@ -109,43 +103,21 @@ export function ModelSelector({
         <div className="grid gap-4 py-4">
           <div className="grid gap-2">
             <Label htmlFor="model">{t('common.model')}</Label>
-            <Select value={selectedModel} onValueChange={setSelectedModel}>
-              <SelectTrigger id="model">
-                <SelectValue placeholder={t('models.selectModelPlaceholder')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="default">
-                  <div className="flex items-center justify-between w-full">
-                    <span>
-                      {defaultModel 
-                        ? `${t('common.default')} (${defaultModel.name})` 
-                        : t('transformations.systemDefault')}
-                    </span>
-                    {defaultModel?.provider && (
-                      <span className="text-xs text-muted-foreground ml-2">
-                        {defaultModel.provider}
-                      </span>
-                    )}
-                  </div>
-                </SelectItem>
-                {isLoading ? (
-                  <div className="flex items-center justify-center py-2">
-                    <LoadingSpinner size="sm" />
-                  </div>
-                ) : (
-                  languageModels.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      <div className="flex items-center justify-between w-full">
-                        <span>{model.name}</span>
-                        <span className="text-xs text-muted-foreground ml-2">
-                          {model.provider}
-                        </span>
-                      </div>
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
+            <ModelCombobox
+              id="model"
+              models={languageModels}
+              value={selectedModel}
+              onChange={setSelectedModel}
+              defaultOption={{
+                value: 'default',
+                label: defaultModel
+                  ? `${t('common.default')} (${defaultModel.name})`
+                  : t('transformations.systemDefault'),
+                provider: defaultModel?.provider,
+              }}
+              isLoading={isLoading}
+              placeholder={t('models.selectModelPlaceholder')}
+            />
           </div>
           {selectedModel && selectedModel !== 'default' && (
             <div className="rounded-lg bg-muted p-3">

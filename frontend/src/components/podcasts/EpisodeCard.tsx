@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { getDateLocale } from '@/lib/utils/date-locale'
-import { InfoIcon, RefreshCcw, Trash2 } from 'lucide-react'
+import { InfoIcon, Mic, RefreshCcw, Sparkles, Trash2 } from 'lucide-react'
 
 import apiClient from '@/lib/api/client'
 import { resolvePodcastAssetUrl } from '@/lib/api/podcasts'
@@ -113,10 +113,21 @@ type OutlineData = {
 type TranscriptEntry = {
   speaker?: string
   dialogue?: string
+  text?: string
+  start?: number
+  end?: number
+  duration?: number
 }
 
 type TranscriptData = {
   transcript?: TranscriptEntry[]
+}
+
+function formatSeconds(secs?: number): string {
+  if (secs === undefined || isNaN(secs)) return ''
+  const m = Math.floor(secs / 60)
+  const s = Math.floor(secs % 60)
+  return `${m}:${s < 10 ? '0' : ''}${s}`
 }
 
 function extractOutlineSegments(outline: unknown): OutlineSegment[] {
@@ -149,6 +160,8 @@ function extractTranscriptEntries(transcript: unknown): TranscriptEntry[] {
     if (Array.isArray(data.transcript)) {
       return data.transcript
     }
+  } else if (Array.isArray(transcript)) {
+    return transcript as TranscriptEntry[]
   }
   return []
 }
@@ -158,48 +171,76 @@ export function EpisodeCard({ episode, onDelete, deleting, onRetry, retrying }: 
   const [audioSrc, setAudioSrc] = useState<string | undefined>()
   const [audioError, setAudioError] = useState<string | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<'summary' | 'outline' | 'transcript'>('summary')
+  const [currentTime, setCurrentTime] = useState<number>(0)
+  const [isPlaying, setIsPlaying] = useState<boolean>(false)
+  const dialogAudioRef = useRef<HTMLAudioElement | null>(null)
+  const cardAudioRef = useRef<HTMLAudioElement | null>(null)
+  const activeEntryRef = useRef<HTMLDivElement | null>(null)
 
   const outlineSegments = useMemo(() => extractOutlineSegments(episode.outline), [episode.outline])
   const transcriptEntries = useMemo(() => extractTranscriptEntries(episode.transcript), [episode.transcript])
 
+  const activeTranscriptIndex = useMemo(() => {
+    if (!transcriptEntries.length) return -1
+    const idx = transcriptEntries.findIndex(
+      (e) =>
+        e.start !== undefined &&
+        e.end !== undefined &&
+        currentTime >= e.start &&
+        currentTime <= e.end
+    )
+    if (idx !== -1) return idx
+
+    for (let i = transcriptEntries.length - 1; i >= 0; i--) {
+      const s = transcriptEntries[i].start
+      if (s !== undefined && currentTime >= s) {
+        return i
+      }
+    }
+    return -1
+  }, [transcriptEntries, currentTime])
+
   useEffect(() => {
-    let revokeUrl: string | undefined
+    if (activeTranscriptIndex !== -1 && activeEntryRef.current) {
+      activeEntryRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      })
+    }
+  }, [activeTranscriptIndex])
+
+  const handleSeek = (startSec?: number) => {
+    if (startSec === undefined) return
+    if (dialogAudioRef.current) {
+      dialogAudioRef.current.currentTime = startSec
+      if (dialogAudioRef.current.paused) {
+        void dialogAudioRef.current.play()
+      }
+    } else if (cardAudioRef.current) {
+      cardAudioRef.current.currentTime = startSec
+      if (cardAudioRef.current.paused) {
+        void cardAudioRef.current.play()
+      }
+    }
+  }
+
+  const streamAudioUrl = useMemo(() => {
+    if (episode.audio_url) {
+      return episode.audio_url.startsWith('http') || episode.audio_url.startsWith('/')
+        ? episode.audio_url
+        : `/${episode.audio_url}`
+    }
+    if (episode.audio_file) {
+      return `/api/podcasts/episodes/${episode.id}/audio`
+    }
+    return undefined
+  }, [episode.audio_url, episode.audio_file, episode.id])
+
+  useEffect(() => {
     setAudioError(null)
-
-    // If backend exposed a protected endpoint, fetch it with auth headers
-    const loadProtectedAudio = async () => {
-      // First resolve the audio URL
-      const directAudioUrl = await resolvePodcastAssetUrl(episode.audio_url ?? episode.audio_file)
-
-      if (!directAudioUrl || !episode.audio_url) {
-        setAudioSrc(directAudioUrl)
-        return
-      }
-
-      try {
-        // apiClient attaches the auth header; directAudioUrl is absolute so
-        // the dynamic baseURL is ignored.
-        const response = await apiClient.get<Blob>(directAudioUrl, {
-          responseType: 'blob',
-        })
-
-        revokeUrl = URL.createObjectURL(response.data)
-        setAudioSrc(revokeUrl)
-      } catch (error) {
-        console.error('Unable to load podcast audio', error)
-        setAudioError(t('podcasts.audioUnavailable'))
-        setAudioSrc(undefined)
-      }
-    }
-
-    void loadProtectedAudio()
-
-    return () => {
-      if (revokeUrl) {
-        URL.revokeObjectURL(revokeUrl)
-      }
-    }
-  }, [episode.audio_url, episode.audio_file, t])
+    setAudioSrc(streamAudioUrl)
+  }, [streamAudioUrl])
 
   const distance = episode.created
     ? formatDistanceToNow(new Date(episode.created), {
@@ -241,6 +282,20 @@ export function EpisodeCard({ episode, onDelete, deleting, onRetry, retrying }: 
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {transcriptEntries.length > 0 ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setActiveTab('transcript')
+                  setDetailsOpen(true)
+                }}
+                className="gap-1.5"
+              >
+                <Mic className="h-3.5 w-3.5 text-primary" />
+                <span className="hidden sm:inline">Lyrics</span>
+              </Button>
+            ) : null}
             <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm">
@@ -258,17 +313,37 @@ export function EpisodeCard({ episode, onDelete, deleting, onRetry, retrying }: 
                 <div className="space-y-4 overflow-hidden">
                   {audioSrc ? (
                     <div className="rounded-md border bg-card p-2">
-                      <audio controls preload="none" src={audioSrc} className="w-full" />
+                      <audio
+                        ref={dialogAudioRef}
+                        controls
+                        preload="metadata"
+                        src={audioSrc}
+                        className="w-full"
+                        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                        onPlay={() => setIsPlaying(true)}
+                        onPause={() => setIsPlaying(false)}
+                      />
                     </div>
                   ) : audioError ? (
                     <p className="text-sm text-destructive">{audioError}</p>
                   ) : null}
 
-                  <Tabs defaultValue="summary" className="h-[60vh] flex flex-col">
+                  <Tabs
+                    value={activeTab}
+                    onValueChange={(val) => setActiveTab(val as 'summary' | 'outline' | 'transcript')}
+                    className="h-[60vh] flex flex-col"
+                  >
                     <TabsList className="grid w-full grid-cols-3">
                       <TabsTrigger value="summary">{t('podcasts.summaryTab')}</TabsTrigger>
                       <TabsTrigger value="outline">{t('podcasts.outlineTab')}</TabsTrigger>
-                      <TabsTrigger value="transcript">{t('podcasts.transcriptTab')}</TabsTrigger>
+                      <TabsTrigger value="transcript" className="flex items-center gap-1.5">
+                        <span>{t('podcasts.transcriptTab')}</span>
+                        {transcriptEntries.some((e) => e.start !== undefined) && (
+                          <Badge variant="secondary" className="px-1 py-0 text-[10px] h-4">
+                            Karaoke
+                          </Badge>
+                        )}
+                      </TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="summary" className="flex-1 overflow-hidden">
@@ -377,14 +452,76 @@ export function EpisodeCard({ episode, onDelete, deleting, onRetry, retrying }: 
                     </TabsContent>
 
                     <TabsContent value="transcript" className="flex-1 overflow-hidden">
-                      <ScrollArea className="h-full pr-4 space-y-3">
+                      <ScrollArea className="h-full pr-4">
                         {transcriptEntries.length > 0 ? (
-                          transcriptEntries.map((entry, index) => (
-                            <div key={index} className="rounded border bg-muted/20 p-3 text-xs space-y-1">
-                              <p className="font-semibold text-foreground">{entry.speaker ?? t('podcasts.speaker')}</p>
-                              <p className="text-muted-foreground whitespace-pre-wrap">{entry.dialogue ?? ''}</p>
-                            </div>
-                          ))
+                          <div className="space-y-3 py-1">
+                            {transcriptEntries.map((entry, index) => {
+                              const isActive = index === activeTranscriptIndex
+                              const text = entry.dialogue || entry.text || ''
+                              const hasTime = entry.start !== undefined
+
+                              return (
+                                <div
+                                  key={index}
+                                  ref={isActive ? activeEntryRef : null}
+                                  onClick={() => handleSeek(entry.start)}
+                                  className={cn(
+                                    'rounded-lg border p-3 text-xs transition-all duration-200 select-text',
+                                    hasTime ? 'cursor-pointer' : '',
+                                    isActive
+                                      ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/40'
+                                      : 'border-border/60 bg-muted/20 hover:bg-muted/40 hover:border-border'
+                                  )}
+                                >
+                                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                                    <div className="flex items-center gap-2">
+                                      <p
+                                        className={cn(
+                                          'font-semibold text-xs',
+                                          isActive ? 'text-primary' : 'text-foreground'
+                                        )}
+                                      >
+                                        {entry.speaker ?? t('podcasts.speaker')}
+                                      </p>
+                                      {isActive && (
+                                        <Badge
+                                          variant="default"
+                                          className="text-[10px] h-4 px-1.5 bg-primary animate-pulse"
+                                        >
+                                          Playing
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    {hasTime ? (
+                                      <Badge
+                                        variant="outline"
+                                        className={cn(
+                                          'font-mono text-[10px] px-1.5 py-0 h-4 transition-colors',
+                                          isActive
+                                            ? 'border-primary/50 text-primary bg-primary/5 font-semibold'
+                                            : 'text-muted-foreground'
+                                        )}
+                                        title="Click to jump audio here"
+                                      >
+                                        {formatSeconds(entry.start)}
+                                        {entry.end !== undefined && ` - ${formatSeconds(entry.end)}`}
+                                      </Badge>
+                                    ) : null}
+                                  </div>
+                                  <p
+                                    className={cn(
+                                      'whitespace-pre-wrap leading-relaxed',
+                                      isActive
+                                        ? 'text-foreground font-medium text-[13px]'
+                                        : 'text-muted-foreground'
+                                    )}
+                                  >
+                                    {text}
+                                  </p>
+                                </div>
+                              )
+                            })}
+                          </div>
                         ) : (
                           <p className="text-xs text-muted-foreground">{t('podcasts.noTranscript')}</p>
                         )}
@@ -432,7 +569,16 @@ export function EpisodeCard({ episode, onDelete, deleting, onRetry, retrying }: 
 
         {audioSrc ? (
           <div className="rounded-md border bg-card p-2">
-            <audio controls preload="none" src={audioSrc} className="w-full" />
+            <audio
+              ref={cardAudioRef}
+              controls
+              preload="metadata"
+              src={audioSrc}
+              className="w-full"
+              onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+            />
           </div>
         ) : audioError ? (
           <p className="text-sm text-destructive">{audioError}</p>

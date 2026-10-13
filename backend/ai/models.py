@@ -250,6 +250,36 @@ class ModelManager:
             provider, config = await resolve_anthropic_compatible_config(
                 config, **kwargs
             )
+        elif model.provider == "kaggle":
+            base_url = config.get("base_url") or os.environ.get("KAGGLE_BASE_URL", "")
+            api_key = config.get("api_key") or os.environ.get("KAGGLE_API_KEY", "")
+            if not base_url:
+                raise ConfigurationError(
+                    "Kaggle TPU provider requires a base URL. Please configure it in Settings -> Providers -> Kaggle TPU or set KAGGLE_BASE_URL in your .env."
+                )
+            if model.type == "language":
+                from backend.ai.kaggle import KaggleChatModel
+                return KaggleChatModel(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model_name=model.name,
+                    **kwargs,
+                )
+            elif model.type == "embedding":
+                from backend.ai.kaggle import KaggleEmbeddingModel
+                return KaggleEmbeddingModel(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model_name=model.name,
+                )
+            elif model.type in ("text_to_speech", "speech_to_text"):
+                from backend.ai.kaggle import KagglePodcastRunner
+                return KagglePodcastRunner(
+                    base_url=base_url,
+                    api_key=api_key,
+                )
+            else:
+                raise ConfigurationError(f"Invalid model type: {model.type}")
         else:
             config.update(kwargs)
             # DB stores underscores but Esperanto expects hyphens.

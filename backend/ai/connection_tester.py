@@ -521,8 +521,21 @@ async def test_individual_model(model) -> Tuple[bool, str]:
         manager = ModelManager()
         esp_model = await manager.get_model(model.id)
 
-        if esp_model is None:
-            return False, "Could not create model instance"
+        if model.provider == "kaggle":
+            from backend.ai.kaggle import KaggleChatModel, KaggleEmbeddingModel, KagglePodcastRunner
+            if isinstance(esp_model, KaggleChatModel):
+                ai_msg = await esp_model.ainvoke("Hi!")
+                text = str(ai_msg.content)[:100] if ai_msg and ai_msg.content else "(empty response)"
+                return True, f"Response: {text}"
+            elif isinstance(esp_model, KaggleEmbeddingModel):
+                res = await esp_model.aembed(["This is a test."])
+                dims = len(res[0]) if res and len(res) > 0 else 0
+                return True, f"Embedding dimensions: {dims}"
+            elif isinstance(esp_model, KagglePodcastRunner):
+                success, msg, _ = await esp_model.client.health_check()
+                return success, f"Kaggle Podcast Engine: {msg}"
+            else:
+                return True, "Kaggle model configured"
 
         if model.type == "language":
             if not isinstance(esp_model, LanguageModel):

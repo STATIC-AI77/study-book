@@ -884,6 +884,7 @@ export const enUS = {
     defaultAssignmentsDesc: "Configure which models to use for different purposes across StudyBook",
     missingRequiredModels: "Missing required models: {{models}}. StudyBook may not function properly without these.",
     selectModelPlaceholder: "Select a model",
+    searchPlaceholder: "Search models...",
     noneOption: "None",
     noneFallbackToChat: "Use fallback (chat default)",
     usingChatModelHint: "Using chat model ({{model}})",

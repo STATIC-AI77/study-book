@@ -36,12 +36,31 @@ describe('ChatPanel composer', () => {
     const textarea = getTextarea()
     fireEvent.change(textarea, { target: { value: '  hello world  ' } })
 
-    const sendButton = screen.getByRole('button')
+    const sendButton = screen.getByTestId('chat-send-button')
     fireEvent.click(sendButton)
 
     expect(onSendMessage).toHaveBeenCalledTimes(1)
     expect(onSendMessage).toHaveBeenCalledWith('hello world', undefined)
     expect(textarea.value).toBe('')
+  })
+
+  it('renders web search toggle and calls onToggleWebSearch when clicked', () => {
+    const onToggleWebSearch = vi.fn()
+    render(
+      <ChatPanel
+        messages={[]}
+        isStreaming={false}
+        contextIndicators={null}
+        onSendMessage={vi.fn()}
+        webSearchEnabled={false}
+        onToggleWebSearch={onToggleWebSearch}
+      />
+    )
+
+    const webSearchBtn = screen.getByRole('button', { name: /web search/i })
+    expect(webSearchBtn).toBeInTheDocument()
+    fireEvent.click(webSearchBtn)
+    expect(onToggleWebSearch).toHaveBeenCalledTimes(1)
   })
 
   it('sends on Cmd+Enter on macOS', () => {

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -473,6 +474,8 @@ class FlashcardDeckPayload(BaseModel):
     correct_count: int = 0
     wrong_count: int = 0
     last_card_index: int = 0
+    model_override: Optional[str] = None
+    target_count: Optional[int] = 25
 
 
 class FlashcardDeckResponse(BaseModel):
@@ -481,6 +484,8 @@ class FlashcardDeckResponse(BaseModel):
     correct_count: int = 0
     wrong_count: int = 0
     last_card_index: int = 0
+    model_override: Optional[str] = None
+    target_count: Optional[int] = 25
     updated: Optional[str] = None
 
 
@@ -503,13 +508,13 @@ async def get_notebook_flashcards(notebook_id: str):
             correct_count=row.get("correct_count", 0),
             wrong_count=row.get("wrong_count", 0),
             last_card_index=row.get("last_card_index", 0),
+            model_override=row.get("model_override"),
+            target_count=row.get("target_count", 25),
             updated=str(row.get("updated", "")),
         )
     except Exception as e:
-        logger.error(f"Error fetching flashcards for notebook {notebook_id}: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching flashcards: {str(e)}"
-        )
+        logger.warning(f"Error fetching flashcards for notebook {notebook_id}: {e}")
+        return None
 
 
 @router.put(
@@ -526,6 +531,8 @@ async def save_notebook_flashcards(notebook_id: str, payload: FlashcardDeckPaylo
             "correct_count": payload.correct_count,
             "wrong_count": payload.wrong_count,
             "last_card_index": payload.last_card_index,
+            "model_override": payload.model_override,
+            "target_count": payload.target_count or 25,
         }
         await repo_upsert("flashcard_deck", record_id, data, add_timestamp=True)
         return FlashcardDeckResponse(
@@ -534,6 +541,8 @@ async def save_notebook_flashcards(notebook_id: str, payload: FlashcardDeckPaylo
             correct_count=payload.correct_count,
             wrong_count=payload.wrong_count,
             last_card_index=payload.last_card_index,
+            model_override=payload.model_override,
+            target_count=payload.target_count or 25,
             updated=str(datetime.now(timezone.utc)),
         )
     except Exception as e:
@@ -541,4 +550,152 @@ async def save_notebook_flashcards(notebook_id: str, payload: FlashcardDeckPaylo
         raise HTTPException(
             status_code=500, detail=f"Error saving flashcards: {str(e)}"
         )
+
+
+class GenerateFlashcardsRequest(BaseModel):
+    count: int = Field(default=25, ge=1, le=100, description="Number of flashcards to generate (1-100)")
+    model_override: Optional[str] = Field(None, description="Model ID to use for generation")
+
+
+@router.post(
+    "/notebooks/{notebook_id}/flashcards/generate",
+    response_model=FlashcardDeckResponse,
+)
+async def generate_notebook_flashcards(
+    notebook_id: str, request: GenerateFlashcardsRequest
+):
+    """Generate study flashcards directly without polluting notebook chat sessions."""
+    try:
+        clean_id = notebook_id.replace("notebook:", "")
+        full_id = f"notebook:{clean_id}"
+        notebook = await Notebook.get(full_id)
+        if not notebook:
+            raise HTTPException(status_code=404, detail="Notebook not found")
+
+        # 1. Fetch sources and notes to build context
+        from backend.utils.context_builder import build_notebook_context
+
+        sources = await notebook.get_sources()
+        notes = await notebook.get_notes()
+        source_config = {s.id: "full content" for s in sources}
+        note_config = {n.id: "full content" for n in notes}
+
+        context_data, total_content = await build_notebook_context(
+            notebook, {"sources": source_config, "notes": note_config}
+        )
+
+        if not total_content or not total_content.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Notebook has no readable source content or notes to generate flashcards from.",
+            )
+
+        # 2. Prepare prompt
+        count = max(1, min(100, request.count or 25))
+        system_instruction = (
+            f"You are an expert tutor for notebook '{notebook.name}'. "
+            "Analyze the reference context thoroughly and generate high-quality study flashcards.\n\n"
+            f"Reference Context:\n{total_content}"
+        )
+        user_prompt = (
+            f"Generate a comprehensive, rigorous study deck of exactly {count} flashcards covering "
+            "core concepts, key mechanisms, definitions, critical facts, and application scenarios.\n\n"
+            "STRICT INSTRUCTIONS:\n"
+            f"1. Generate EXACTLY {count} flashcards (numbered 1 to {count}).\n"
+            "2. Questions must be crisp, insightful, and test genuine understanding.\n"
+            "3. Answers must be direct, clear, and comprehensive.\n"
+            "4. Output ONLY valid JSON in this exact structure without conversational markdown:\n"
+            "[\n"
+            "  {\n"
+            '    "id": 1,\n'
+            '    "question": "Question text here?",\n'
+            '    "answer": "Answer explanation here.",\n'
+            '    "category": "Topic Name"\n'
+            "  }\n"
+            "]\n"
+        )
+
+        # 3. Provision model
+        from backend.ai.provision import provision_langchain_model
+        from langchain_core.messages import SystemMessage, HumanMessage
+        import json
+        import re
+        from backend.utils import clean_thinking_content
+        from backend.utils.text_utils import extract_text_content
+
+        model = await provision_langchain_model(
+            total_content,
+            request.model_override,
+            "chat",
+            max_tokens=8192,
+        )
+
+        messages = [
+            SystemMessage(content=system_instruction),
+            HumanMessage(content=user_prompt),
+        ]
+
+        # 4. Invoke LLM in thread
+        response = await asyncio.to_thread(model.invoke, messages)
+        raw_text = extract_text_content(response.content)
+        cleaned_text = clean_thinking_content(raw_text)
+
+        # 5. Parse JSON array
+        match = re.search(r"\[[\s\S]*\]", cleaned_text)
+        if not match:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not parse flashcards JSON array from model output.",
+            )
+
+        try:
+            cards_raw = json.loads(match.group(0))
+        except Exception:
+            fallback = re.sub(r",\s*([}\]])", r"\1", match.group(0))
+            fallback = re.sub(r"[\x00-\x1f]+", " ", fallback)
+            cards_raw = json.loads(fallback)
+
+        if not isinstance(cards_raw, list) or len(cards_raw) == 0:
+            raise HTTPException(
+                status_code=500,
+                detail="Model returned an empty list of flashcards.",
+            )
+
+        valid_cards = [
+            FlashcardItem(
+                id=c.get("id") or (idx + 1),
+                question=str(c.get("question", "")).strip(),
+                answer=str(c.get("answer", "")).strip(),
+                category=str(c.get("category") or "General").strip(),
+            )
+            for idx, c in enumerate(cards_raw)
+            if c.get("question") and c.get("answer")
+        ]
+
+        if not valid_cards:
+            raise HTTPException(
+                status_code=500,
+                detail="No valid question/answer pairs found in model output.",
+            )
+
+        # 6. Save directly to SurrealDB
+        payload = FlashcardDeckPayload(
+            cards=valid_cards,
+            correct_count=0,
+            wrong_count=0,
+            last_card_index=0,
+            model_override=request.model_override,
+            target_count=request.count,
+        )
+        return await save_notebook_flashcards(notebook_id, payload)
+
+    except HTTPException:
+        raise
+    except OpenNotebookError as e:
+        logger.error(f"OpenNotebookError generating flashcards: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error generating flashcards: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate flashcards: {str(e)}")
+
 

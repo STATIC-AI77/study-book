@@ -105,11 +105,19 @@ class PodcastService:
             )
             return job_id_str
 
+        except ValueError as e:
+            logger.warning(f"Validation error submitting podcast generation job: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail=str(e),
+            )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Failed to submit podcast generation job: {e}")
             raise HTTPException(
                 status_code=500,
-                detail="Failed to submit podcast generation job",
+                detail=f"Failed to submit podcast generation job: {str(e)}",
             )
 
     @staticmethod

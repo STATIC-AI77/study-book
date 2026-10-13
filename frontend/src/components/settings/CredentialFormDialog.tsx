@@ -48,8 +48,9 @@ export function CredentialFormDialog({
   const isOllama = provider === 'ollama'
   const isOmlx = provider === 'omlx'
   const isOpenAICompatible = provider === 'openai_compatible'
-  // oMLX is a local no-auth endpoint by default (optional --api-key).
-  const requiresApiKey = !isVertex && !isOllama && !isOmlx && !isOpenAICompatible
+  const isKaggle = provider === 'kaggle'
+  // oMLX, Ollama, and Kaggle are local/tunnel endpoints where API key is optional.
+  const requiresApiKey = !isVertex && !isOllama && !isOmlx && !isOpenAICompatible && !isKaggle
 
   const [name, setName] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -125,7 +126,9 @@ export function CredentialFormDialog({
     ? true
     : isVertex
       ? name.trim() !== '' && project.trim() !== '' && location.trim() !== ''
-      : name.trim() !== '' && (!requiresApiKey || apiKey.trim() !== '')
+      : isKaggle
+        ? name.trim() !== '' && baseUrl.trim() !== ''
+        : name.trim() !== '' && (!requiresApiKey || apiKey.trim() !== '')
 
   const docsUrl = providerInfo?.docs_url ?? undefined
 
@@ -233,7 +236,10 @@ export function CredentialFormDialog({
           {/* Base URL (non-Vertex) */}
           {!isVertex && (
             <div className="space-y-2">
-              <Label htmlFor="base-url" className="text-muted-foreground">{t('apiKeys.baseUrl')}</Label>
+              <Label htmlFor="base-url" className={isKaggle ? '' : 'text-muted-foreground'}>
+                {t('apiKeys.baseUrl')}
+                {isKaggle && <span className="text-destructive font-normal ml-1">*</span>}
+              </Label>
               <input
                 id="base-url"
                 type="url"
@@ -245,13 +251,15 @@ export function CredentialFormDialog({
                     ? 'http://localhost:11434'
                     : isOmlx
                       ? OMLX_DEFAULT_BASE_URL
-                      : 'https://api.example.com/v1'
+                      : isKaggle
+                        ? 'https://your-tunnel.ngrok-free.app'
+                        : 'https://api.example.com/v1'
                 }
                 disabled={isSubmitting}
               />
               <p className="text-xs text-muted-foreground">
                 {t(
-                  isOpenAICompatible
+                  isOpenAICompatible || isKaggle
                     ? 'apiKeys.openAICompatibleBaseUrlHint'
                     : 'apiKeys.baseUrlOverrideHint',
                 )}
